@@ -1,30 +1,74 @@
+import { useState } from 'react';
 import type { CountryStats } from '../types/index.js';
 import { formatCurrency, formatNumber } from '../utils/dataAnalysis';
 
 interface CountryDetailProps {
   stats: CountryStats;
   onClose: () => void;
+  onCompanyClick: (name: string) => void;
 }
 
-export const CountryDetail = ({ stats, onClose }: CountryDetailProps) => {
+export const CountryDetail = ({ stats, onClose, onCompanyClick }: CountryDetailProps) => {
   const tradeBalanceColor = stats.tradeBalance >= 0 ? 'text-green-600' : 'text-red-600';
+
+  const [showAllExporters, setShowAllExporters] = useState(false);
+  const [showAllImporters, setShowAllImporters] = useState(false);
 
   // Yıllık satış hacmi hesapla
   const getYearlySales = () => {
+    if (stats.yearlyTrade && stats.yearlyTrade.length > 0) {
+      return stats.yearlyTrade.map(y => ({ year: y.year, value: y.exportValue }));
+    }
     const salesByYear = new Map<number, number>();
-
     stats.rawExports.forEach(trade => {
       const year = new Date(trade['TARİH']).getFullYear();
       const value = trade['ÜRÜN MİKTARI (KG)'] * trade['ÜRÜN FİYATI (USD)'];
       salesByYear.set(year, (salesByYear.get(year) || 0) + value);
     });
-
     return Array.from(salesByYear.entries())
       .sort((a, b) => a[0] - b[0])
       .map(([year, value]) => ({ year, value }));
   };
 
   const yearlySales = getYearlySales();
+
+  const renderCompanyCard = (company: { name: string; volume: number; value: number; companyCountry: string }, idx: number) => {
+    const unitPrice = company.volume > 0 ? company.value / company.volume : 0;
+    return (
+      <div key={idx} className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition">
+        <div className="flex justify-between items-start">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1 flex-wrap">
+              <button
+                onClick={() => onCompanyClick(company.name)}
+                className="font-semibold text-blue-700 hover:underline text-left"
+              >
+                {company.name}
+              </button>
+            </div>
+            <div className="text-sm text-gray-600">
+              {formatNumber(company.volume)} kg &middot; ${unitPrice.toFixed(2)}/kg
+            </div>
+          </div>
+          <div className="text-right ml-2">
+            <div className="font-bold text-green-600">{formatCurrency(company.value)}</div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderToggle = (show: boolean, setShow: (v: boolean) => void, total: number) => {
+    if (total <= 5) return null;
+    return (
+      <button
+        onClick={() => setShow(!show)}
+        className="mt-2 text-sm text-blue-600 hover:underline"
+      >
+        {show ? 'Gizle' : `Tümünü Göster (${total})`}
+      </button>
+    );
+  };
 
   return (
     <div className="fixed right-0 top-0 h-full w-full md:w-2/5 bg-white shadow-2xl overflow-y-auto z-10">
@@ -74,6 +118,14 @@ export const CountryDetail = ({ stats, onClose }: CountryDetailProps) => {
               </div>
             </div>
           </div>
+          {stats.tradeCount > 0 && (
+            <div className="mt-4 bg-white rounded p-3 shadow">
+              <div className="text-sm text-gray-600">Toplam İşlem Sayısı</div>
+              <div className="text-xl font-bold text-indigo-600">
+                {formatNumber(stats.tradeCount)} kayıt
+              </div>
+            </div>
+          )}
           <div className="mt-4 bg-white rounded p-3 shadow">
             <div className="text-sm text-gray-600 mb-2">Ticaret Dengesi</div>
             <div className={`text-2xl font-bold ${tradeBalanceColor}`}>
@@ -95,148 +147,32 @@ export const CountryDetail = ({ stats, onClose }: CountryDetailProps) => {
           )}
         </section>
 
-        {/* En Çok Satan Firmalar */}
+        {/* En Çok İhracat Yapan Firmalar */}
         {stats.topExporters.length > 0 && (
           <section>
-            <h3 className="text-xl font-bold text-gray-800 mb-3">🏭 En Çok Satan Firmalar</h3>
+            <h3 className="text-xl font-bold text-gray-800 mb-3">🏭 En Çok İhracat Yapan Firmalar</h3>
             <div className="space-y-2">
-              {stats.topExporters.slice(0, 5).map((company, idx) => {
-                const unitPrice = company.volume > 0 ? company.value / company.volume : 0;
-                return (
-                  <div key={idx} className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition">
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <div className="font-semibold text-gray-800">{company.name}</div>
-                        <div className="text-sm text-gray-600">
-                          {formatNumber(company.volume)} kg / ${unitPrice.toFixed(2)}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-bold text-green-600">{formatCurrency(company.value)}</div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {stats.topExporters
+                .slice(0, showAllExporters ? undefined : 5)
+                .map((company, idx) => renderCompanyCard(company, idx))}
             </div>
+            {renderToggle(showAllExporters, setShowAllExporters, stats.topExporters.length)}
           </section>
         )}
 
-        {/* En Büyük Müşteriler */}
-        {stats.topBuyers.length > 0 && (
-          <section>
-            <h3 className="text-xl font-bold text-gray-800 mb-3">👥 En Büyük Müşteriler</h3>
-            <div className="space-y-2">
-              {stats.topBuyers.slice(0, 5).map((buyer, idx) => {
-                const unitPrice = buyer.volume > 0 ? buyer.value / buyer.volume : 0;
-                return (
-                  <div key={idx} className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition">
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <div className="font-semibold text-gray-800">{buyer.name}</div>
-                        <div className="text-sm text-gray-600">
-                          {formatNumber(buyer.volume)} kg / ${unitPrice.toFixed(2)}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-bold text-blue-600">{formatCurrency(buyer.value)}</div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {/* En Çok Gönderdiği Ülkeler */}
-        {stats.topDestinations.length > 0 && (
-          <section>
-            <h3 className="text-xl font-bold text-gray-800 mb-3">🌍 En Çok Gönderdiği Ülkeler</h3>
-            <div className="space-y-2">
-              {stats.topDestinations.map((dest, idx) => (
-                <div key={idx} className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="font-semibold text-gray-800">{dest.country}</div>
-                      <div className="text-sm text-gray-600">
-                        {formatNumber(dest.volume)} kg
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-bold text-green-600">{formatCurrency(dest.value)}</div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* En Çok Aldığı Ülkeler */}
-        {stats.topSources.length > 0 && (
-          <section>
-            <h3 className="text-xl font-bold text-gray-800 mb-3">📦 En Çok Aldığı Ülkeler</h3>
-            <div className="space-y-2">
-              {stats.topSources.map((source, idx) => (
-                <div key={idx} className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="font-semibold text-gray-800">{source.country}</div>
-                      <div className="text-sm text-gray-600">
-                        {formatNumber(source.volume)} kg
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-bold text-blue-600">{formatCurrency(source.value)}</div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* En Çok Alan Firmalar */}
+        {/* En Çok İthalat Yapan Firmalar */}
         {stats.topImporters.length > 0 && (
           <section>
-            <h3 className="text-xl font-bold text-gray-800 mb-3">🏢 Bu Ülkeden En Çok Alan Firmalar</h3>
+            <h3 className="text-xl font-bold text-gray-800 mb-3">🏢 En Çok İthalat Yapan Firmalar</h3>
             <div className="space-y-2">
-              {stats.topImporters.slice(0, 5).map((importer, idx) => {
-                const unitPrice = importer.volume > 0 ? importer.value / importer.volume : 0;
-                return (
-                  <div key={idx} className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition">
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <div className="font-semibold text-gray-800">{importer.name}</div>
-                        <div className="text-sm text-gray-600">
-                          {formatNumber(importer.volume)} kg / ${unitPrice.toFixed(2)}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-bold text-blue-600">{formatCurrency(importer.value)}</div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {stats.topImporters
+                .slice(0, showAllImporters ? undefined : 5)
+                .map((importer, idx) => renderCompanyCard(importer, idx))}
             </div>
+            {renderToggle(showAllImporters, setShowAllImporters, stats.topImporters.length)}
           </section>
         )}
 
-        {/* Tüm Firmalar */}
-        {stats.exportCompanies.length > 0 && (
-          <section>
-            <h3 className="text-xl font-bold text-gray-800 mb-3">📋 Tüm İhracatçı Firmalar</h3>
-            <div className="bg-gray-50 rounded p-3 max-h-60 overflow-y-auto">
-              <ul className="space-y-1">
-                {stats.exportCompanies.map((company, idx) => (
-                  <li key={idx} className="text-sm text-gray-700">• {company}</li>
-                ))}
-              </ul>
-            </div>
-          </section>
-        )}
       </div>
     </div>
   );

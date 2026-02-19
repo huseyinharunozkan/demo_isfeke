@@ -27,7 +27,7 @@ export const analyzeCountryData = (
   });
 
   const topExporters = Array.from(exporterStats.entries())
-    .map(([name, data]) => ({ name, ...data }))
+    .map(([name, data]) => ({ name, ...data, companyCountry: '' }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10);
 
@@ -46,7 +46,7 @@ export const analyzeCountryData = (
   });
 
   const topBuyers = Array.from(buyerStats.entries())
-    .map(([name, data]) => ({ name, ...data }))
+    .map(([name, data]) => ({ name, ...data, companyCountry: '' }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10);
 
@@ -65,7 +65,7 @@ export const analyzeCountryData = (
   });
 
   const topImporters = Array.from(importerStats.entries())
-    .map(([name, data]) => ({ name, ...data }))
+    .map(([name, data]) => ({ name, ...data, companyCountry: '' }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10);
 
@@ -84,7 +84,7 @@ export const analyzeCountryData = (
   });
 
   const topSellers = Array.from(sellerStats.entries())
-    .map(([name, data]) => ({ name, ...data }))
+    .map(([name, data]) => ({ name, ...data, companyCountry: '' }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10);
 
@@ -188,6 +188,8 @@ export const analyzeCountryData = (
     exitPorts,
     entryPorts,
     tradeBalance,
+    tradeCount: 0,
+    yearlyTrade: [],
     rawExports: exports,
     rawImports: imports
   };

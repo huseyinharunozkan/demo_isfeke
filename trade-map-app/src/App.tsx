@@ -1,61 +1,99 @@
 import { useState, useEffect } from 'react';
-import * as XLSX from 'xlsx';
 import { WorldMap } from './components/WorldMap';
 import { CountryDetail } from './components/CountryDetail';
-import { mockTradeData } from './data/mockData';
-import { analyzeCountryData } from './utils/dataAnalysis';
-import type { TradeData } from './types/index.js';
+import { CompanyDetail } from './components/CompanyDetail';
+import type { MapCountry, CountryStats, CompanyStats } from './types/index.js';
 import './App.css';
+
+const API_BASE = 'http://localhost:3001/api';
 
 function App() {
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [showInstructions, setShowInstructions] = useState(true);
-  const [tradeData, setTradeData] = useState<TradeData[]>(mockTradeData);
-  const [loading, setLoading] = useState(true);
+  const [mapCountries, setMapCountries]   = useState<MapCountry[]>([]);
+  const [countryStats, setCountryStats]   = useState<CountryStats | null>(null);
+  const [selectedCompany, setSelectedCompany] = useState<CompanyStats | null>(null);
+  const [loadingMap, setLoadingMap]       = useState(true);
+  const [loadingStats, setLoadingStats]   = useState(false);
+  const [error, setError]                 = useState<string | null>(null);
 
-  // Excel dosyasını yükle
+  // Harita verilerini yükle
   useEffect(() => {
-    const loadExcelData = async () => {
-      try {
-        const response = await fetch('/Ornek_Veri_Seti_final.xlsx');
-        const arrayBuffer = await response.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer);
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet) as TradeData[];
-
-        setTradeData(jsonData);
-        console.log(`✅ ${jsonData.length} adet ticaret kaydı yüklendi`);
-      } catch (error) {
-        console.error('Excel yüklenirken hata:', error);
-        console.log('Mock data kullanılıyor');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadExcelData();
+    fetch(`${API_BASE}/countries`)
+      .then(r => r.json())
+      .then((data: MapCountry[]) => {
+        setMapCountries(data);
+        console.log(`✅ ${data.length} ülke yüklendi`);
+      })
+      .catch(err => {
+        console.error('API bağlantı hatası:', err);
+        setError('Backend API\'ye bağlanılamadı. http://localhost:3001 çalışıyor mu?');
+      })
+      .finally(() => setLoadingMap(false));
   }, []);
 
-  const handleCountryClick = (countryName: string) => {
+  const handleCountryClick = async (countryName: string) => {
     setSelectedCountry(countryName);
     setShowInstructions(false);
+    setLoadingStats(true);
+    setCountryStats(null);
+
+    try {
+      const res  = await fetch(`${API_BASE}/countries/${encodeURIComponent(countryName)}/stats`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Bilinmeyen hata');
+      setCountryStats(data as CountryStats);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('Stats hatası:', msg);
+    } finally {
+      setLoadingStats(false);
+    }
+  };
+
+  const handleCompanyClick = async (companyName: string) => {
+    setLoadingStats(true);
+    try {
+      const res  = await fetch(`${API_BASE}/companies/${encodeURIComponent(companyName)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Bilinmeyen hata');
+      setSelectedCompany(data as CompanyStats);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('Company stats hatası:', msg);
+    } finally {
+      setLoadingStats(false);
+    }
   };
 
   const handleCloseDetail = () => {
     setSelectedCountry(null);
+    setCountryStats(null);
+    setSelectedCompany(null);
   };
 
-  const countryStats = selectedCountry
-    ? analyzeCountryData(selectedCountry, tradeData)
-    : null;
-
-  if (loading) {
+  if (loadingMap) {
     return (
       <div className="w-screen h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="text-6xl mb-4 animate-bounce">📊</div>
           <h2 className="text-2xl font-bold text-gray-800">Veriler Yükleniyor...</h2>
-          <p className="text-gray-600 mt-2">Excel dosyanız işleniyor</p>
+          <p className="text-gray-600 mt-2">Supabase'den ülke verileri çekiliyor</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="w-screen h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center max-w-md bg-white rounded-xl shadow-lg p-8">
+          <div className="text-5xl mb-4">⚠️</div>
+          <h2 className="text-xl font-bold text-red-600 mb-2">Bağlantı Hatası</h2>
+          <p className="text-gray-600 text-sm">{error}</p>
+          <code className="block mt-4 bg-gray-100 rounded p-2 text-xs text-left">
+            cd backend && npm run dev
+          </code>
         </div>
       </div>
     );
@@ -74,8 +112,8 @@ function App() {
               </p>
             </div>
             <div className="bg-blue-800 px-4 py-2 rounded-lg">
-              <div className="text-sm text-blue-200">Toplam Kayıt</div>
-              <div className="text-2xl font-bold">{tradeData.length}</div>
+              <div className="text-sm text-blue-200">Ülke Sayısı</div>
+              <div className="text-2xl font-bold">{mapCountries.filter(c => c.totalTrade > 0).length}</div>
             </div>
           </div>
         </div>
@@ -83,10 +121,9 @@ function App() {
 
       {/* Main Content */}
       <div className="relative" style={{ height: 'calc(100vh - 80px)' }}>
-        {/* Map */}
         <div className="w-full h-full">
           <WorldMap
-            data={tradeData}
+            countries={mapCountries}
             onCountryClick={handleCountryClick}
             selectedCountry={selectedCountry}
           />
@@ -97,33 +134,17 @@ function App() {
           <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white rounded-lg shadow-2xl p-8 max-w-md z-20">
             <div className="text-center">
               <div className="text-6xl mb-4">🗺️</div>
-              <h2 className="text-2xl font-bold text-gray-800 mb-4">
-                Hoş Geldiniz!
-              </h2>
+              <h2 className="text-2xl font-bold text-gray-800 mb-4">Hoş Geldiniz!</h2>
               <p className="text-gray-600 mb-4">
                 Harita üzerindeki <span className="text-green-600 font-semibold">renkli ülkelere</span> tıklayarak detaylı ticaret bilgilerini görüntüleyebilirsiniz.
               </p>
               <div className="bg-gray-50 rounded p-4 text-left text-sm space-y-2">
-                <div className="flex items-start">
-                  <span className="text-green-600 mr-2">✓</span>
-                  <span>En çok satan firmalar</span>
-                </div>
-                <div className="flex items-start">
-                  <span className="text-green-600 mr-2">✓</span>
-                  <span>En büyük müşteriler</span>
-                </div>
-                <div className="flex items-start">
-                  <span className="text-green-600 mr-2">✓</span>
-                  <span>Fiyat ortalamaları</span>
-                </div>
-                <div className="flex items-start">
-                  <span className="text-green-600 mr-2">✓</span>
-                  <span>Ticaret dengesi</span>
-                </div>
-                <div className="flex items-start">
-                  <span className="text-green-600 mr-2">✓</span>
-                  <span>Liman bilgileri</span>
-                </div>
+                {['En çok satan firmalar', 'En büyük müşteriler', 'Fiyat ortalamaları', 'Ticaret dengesi', 'Yıllık trend'].map(item => (
+                  <div key={item} className="flex items-start">
+                    <span className="text-green-600 mr-2">✓</span>
+                    <span>{item}</span>
+                  </div>
+                ))}
               </div>
               <button
                 onClick={() => setShowInstructions(false)}
@@ -139,28 +160,46 @@ function App() {
         <div className="absolute bottom-4 left-4 bg-white rounded-lg shadow-lg p-4 z-10">
           <h3 className="font-bold text-gray-800 mb-2">Lejant</h3>
           <div className="space-y-1 text-sm">
-            <div className="flex items-center">
-              <div className="w-4 h-4 rounded mr-2 bg-blue-600"></div>
-              <span>Seçili Ülke</span>
-            </div>
-            <div className="flex items-center">
-              <div className="w-4 h-4 rounded mr-2 bg-green-400"></div>
-              <span>Yüksek Ticaret</span>
-            </div>
-            <div className="flex items-center">
-              <div className="w-4 h-4 rounded mr-2 bg-green-100"></div>
-              <span>Düşük Ticaret</span>
-            </div>
-            <div className="flex items-center">
-              <div className="w-4 h-4 rounded mr-2 bg-gray-300"></div>
-              <span>Veri Yok</span>
-            </div>
+            {[
+              { color: 'bg-blue-600',  label: 'Seçili Ülke' },
+              { color: 'bg-green-400', label: 'Yüksek Ticaret' },
+              { color: 'bg-green-100', label: 'Düşük Ticaret' },
+              { color: 'bg-gray-300',  label: 'Veri Yok' },
+            ].map(({ color, label }) => (
+              <div key={label} className="flex items-center">
+                <div className={`w-4 h-4 rounded mr-2 ${color}`}></div>
+                <span>{label}</span>
+              </div>
+            ))}
           </div>
         </div>
 
+        {/* Stats yüklenirken spinner */}
+        {loadingStats && (
+          <div className="absolute right-0 top-0 h-full w-full md:w-2/5 bg-white shadow-2xl flex items-center justify-center z-10">
+            <div className="text-center">
+              <div className="text-4xl mb-3 animate-spin">⏳</div>
+              <p className="text-gray-600">Veriler çekiliyor...</p>
+            </div>
+          </div>
+        )}
+
+        {/* Company Detail Panel */}
+        {!loadingStats && selectedCompany && (
+          <CompanyDetail
+            stats={selectedCompany}
+            onBack={() => setSelectedCompany(null)}
+            onClose={handleCloseDetail}
+          />
+        )}
+
         {/* Country Detail Panel */}
-        {countryStats && (
-          <CountryDetail stats={countryStats} onClose={handleCloseDetail} />
+        {!loadingStats && !selectedCompany && countryStats && (
+          <CountryDetail
+            stats={countryStats}
+            onClose={handleCloseDetail}
+            onCompanyClick={handleCompanyClick}
+          />
         )}
       </div>
     </div>

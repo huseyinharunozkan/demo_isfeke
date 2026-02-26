@@ -78,7 +78,7 @@ Kullanıcı bir ülkeye tıklar, o ülkenin ihracat/ithalat istatistiklerini det
 
 > **Veri kaynağı:** Excel'den Supabase (PostgreSQL) + Express API'ye taşındı.
 > **Frontend:** React + Vite (Next.js geçişi sonraki fazda).
-> **Son commit:** `56d0cea` — feat: Faz 2 tamamlandı — Supabase backend + CompanyDetail sayfası (2026-02-19, pushed to main)
+> **Son commit:** `92e6657` — feat: Faz 3 tamamlandı — gerçek veri import, performans iyileştirmeleri, temizlik (2026-02-26, pushed to main)
 > **Son değişiklikler (2026-02-20):** CompanyDetail ülke bölümleri yeniden adlandırıldı + toggle eklendi; CARGILL Hindistan + ELECTROBRAS Güney Kore trade verisi eklendi
 > **Son değişiklikler (2026-02-21):** Faz 3 frontend performans iyileştirmeleri — Vite proxy (WSL2 fix), arama çubuğu, client cache, AbortController, log scale, @tanstack/react-virtual sanal scroll; recharts grafikleri kaldırıldı (CountryDetail BarChart + CompanyDetail LineChart); CompanyDetail Müşteriler + Tedarikçiler bölümlerinde `+X daha` → `▼ Tümünü Gör` toggle butonu
 > **Son değişiklikler (2026-02-21 — sonrası):** Arama çubuğu `App.tsx`'ten kaldırıldı — `SearchResult` interface, `useDebounce` hook, search state'leri, `searchAbortRef`, arama `useEffect`'leri ve header input/dropdown JSX tamamen silindi
@@ -89,6 +89,9 @@ Kullanıcı bir ülkeye tıklar, o ülkenin ihracat/ithalat istatistiklerini det
 > **Son değişiklikler (2026-02-26 — Gerçek Veri İmport Edildi):** `Kullanılacak 410150.xlsx` (7.648 satır) Supabase'e aktarıldı. `import-to-supabase.js` güncellendi: Excel typo'ları düzeltildi (`GÖNDRİCİ ÜLKE`, `Çıkış Limanı`, `Varış Limanı`), `-` geçersiz ülke/liman değerleri null'a dönüştürüldü. Sonuç: 124 ülke, 1.395 firma, 7.648 ticaret kaydı.
 > **Son değişiklikler (2026-02-26 — Veri Temizlendi):** Herhangi bir kolonu boş veya `"-"` olan satırlar import dışı bırakıldı. `import-to-supabase.js`'e `isEmpty` filtresi eklendi: tüm kolonları tam dolu olan satırlar alınır (2.194 satır), eksik içerenler atlanır (5.454 satır). DB yeniden sıfırlanıp re-import yapıldı. Güncel sonuç: **70 ülke, 532 firma, 2.194 ticaret kaydı.**
 > **Son değişiklikler (2026-02-26 — Temizlik):** `scripts/fill-missing-data.js` ve `scripts/Temizlenmis_410150.xlsx` silindi — tahmini veri doldurma yönteminden vazgeçildi. `scripts/` klasöründe artık yalnızca `import-to-supabase.js` mevcut.
+> **Son değişiklikler (2026-02-26 — Repo Temizliği):** `analyze-excel.js` (arşiv) + `trade-map-app/src/data/mockData.ts` (kullanılmıyor) silindi; `*.xlsx` `.gitignore`'a eklendi (Excel dosyaları artık repo'ya girmez); `backend/src/routes/trades.ts` eklendi (sayfalanmış trade listesi + CSV export + filtreleme — index.ts'e register edilmemiş, ileride kullanılacak).
+> **Son değişiklikler (2026-02-26 — Vercel Deploy):** Frontend Vercel'e deploy edildi. `trade-map-app/.npmrc`'ye `legacy-peer-deps=true` eklendi (`react-simple-maps@3.0.0` React 19 peer dep çakışmasını çözer). `App.tsx`'te `API_BASE = import.meta.env.VITE_API_URL ?? '/api'` — local'de Vite proxy, production'da `VITE_API_URL` env var kullanılır.
+> **Son değişiklikler (2026-02-26 — Vercel Proxy Fix):** `trade-map-app/vercel.json` eklendi — `/api/*` → `https://iskefe-demo.onrender.com/api/*` rewrite kuralı; `VITE_API_URL` env var gerekmeden Vercel production'da backend'e ulaşılır; CORS sorunları da önlenir.
 
 ---
 
@@ -97,9 +100,8 @@ Kullanıcı bir ülkeye tıklar, o ülkenin ihracat/ithalat istatistiklerini det
 ```
 demo_isfeke/
 ├── .env                                # Supabase URL + key'ler (commit edilmez)
-├── .gitignore
+├── .gitignore                          # node_modules/, .env, *.xlsx
 ├── package.json                        # Kök bağımlılıkları (xlsx, @supabase/supabase-js, dotenv)
-├── analyze-excel.js                    # Tek seferlik Excel analiz scripti (arşiv)
 │
 ├── sql/
 │   ├── schema.sql                      # DB şeması: tablolar + 10 view — Supabase SQL Editor'da çalıştır
@@ -120,11 +122,14 @@ demo_isfeke/
 │       └── routes/
 │           ├── countries.ts            # GET /api/countries, GET /api/countries/:name/stats
 │           ├── companies.ts            # GET /api/companies/:name, GET /api/companies/top-exporters
-│           └── search.ts               # GET /api/search?q=...&type=company|all&limit=20
+│           ├── search.ts               # GET /api/search?q=...&type=company|all&limit=20
+│           └── trades.ts               # GET /api/trades (paginated), GET /api/trades/export (CSV) — register edilmemiş, ileride kullanılacak
 │
 └── trade-map-app/                      # Frontend (React + Vite + TypeScript)
+    ├── .npmrc                          # legacy-peer-deps=true (react-simple-maps React 19 uyumu için)
+    ├── vercel.json                     # /api/* → Render backend rewrite (VITE_API_URL env var gerekmez)
     ├── public/
-    │   └── Kullanılacak 410150.xlsx     # Gerçek veri seti (7.648 satır, 2026-02-26'da import edildi)
+    │   └── Kullanılacak 410150.xlsx     # Gerçek veri seti (*.xlsx gitignore'da — lokal disk, repo'ya girmez)
     └── src/
         ├── App.tsx                     # API/proxy, TTL cache, AbortController
         ├── App.css
@@ -136,8 +141,6 @@ demo_isfeke/
         │   ├── CountryDetail.tsx       # virtual scroll (@tanstack/react-virtual); grafiksiz
         │   ├── CompanyDetail.tsx       # virtual scroll; contacts tablo; grafiksiz
         │   └── GlobalLeaderboard.tsx   # PLANLI — global ihracat sıralaması (ülke + firma)
-        ├── data/
-        │   └── mockData.ts             # Artık kullanılmıyor (arşiv)
         ├── types/
         │   └── index.ts                # TradeData, CountryStats (+ yearlyTrade), MapCountry
         └── utils/
@@ -260,7 +263,8 @@ Tam SQL: `sql/schema.sql`
 
 ## Backend API Endpoint'leri
 
-**Base URL:** `http://localhost:3001/api`
+**Base URL (local):** `http://localhost:3001/api`
+**Base URL (production):** `https://iskefe-demo.onrender.com/api`
 
 | Method | Path | Açıklama |
 |--------|------|----------|
@@ -270,6 +274,8 @@ Tam SQL: `sql/schema.sql`
 | GET | `/companies/:name` | Firma detayları: contacts + ihracat/ithalat toplamları |
 | GET | `/companies/top-exporters?limit=N` | Global en çok ihracat yapan firmalar (PLANLI — `v_global_top_exporters` view gerektirir) |
 | GET | `/search?q=...&type=company\|all&limit=20` | Firma + ürün arama (autocomplete) |
+| GET | `/trades?page=&limit=&sortBy=&dateFrom=&dateTo=&hsCode=&...` | Sayfalanmış trade listesi (register edilmemiş — ileride) |
+| GET | `/trades/export` | Tüm tradeleri CSV indir — BOM'lu, Excel Türkçe uyumlu (register edilmemiş — ileride) |
 
 ### GET /countries yanıt formatı (`MapCountry[]`)
 ```typescript
@@ -361,6 +367,8 @@ import { supabase } from '../lib/supabase';
 // Backend — route'lar
 import { countriesRouter } from './routes/countries';
 import { companiesRouter } from './routes/companies';
+import { searchRouter }    from './routes/search';
+// import { tradesRouter } from './routes/trades'; // hazır ama register edilmemiş
 ```
 
 ---
@@ -466,6 +474,7 @@ import { companiesRouter } from './routes/companies';
 - [x] **CompanyDetail tıklanabilir firma adları (2026-02-23):** Müşteriler + Tedarikçiler listelerinde firma adları mavi tıklanabilir `<button>` — hem normal liste hem `VirtualTradeList` pathinde; `onCompanyClick` prop eklendi (`CompanyDetail` + `App.tsx`); `handleCompanyClick` zaten mevcut olduğundan sıfır yeni logic
 - [x] **"📅 Yıllık Sevkiyatlar" section (2026-02-23):** `yearlyExports` + `yearlyImports` yılları birleştirilip tablo olarak gösterilir (yıl | ihracat sevkiyat sayısı | ithalat sevkiyat sayısı); birden fazla yıl varsa footer'da ort./yıl gösterilir; Supabase RPC `get_company_stats`'a `COUNT(*)::int AS "shipmentCount"` eklendi; backend + frontend TypeScript tipleri güncellendi
 - [x] **"← Firmaya Dön" butonu (2026-02-23):** Firma içinden müşteri/tedarikçiye tıklanınca başlıkta "← Firmaya Dön" + "← Ülkeye Dön" butonları yan yana gösterilir; `App.tsx`'te `companyHistory` stack + `selectedCompanyRef` (stale closure önlemi) + `handleBackToCompany` eklendi; `CompanyDetail`'e `onBackToCompany?` prop eklendi; çok kademeli geri navigasyon desteklenir
+- [x] **Repo temizliği (2026-02-26):** `analyze-excel.js` + `mockData.ts` silindi; `*.xlsx` `.gitignore`'a eklendi; `trades.ts` (paginated list + CSV export + filtreler) eklendi — index.ts'e register edilmedi, ileride kullanılacak
 - [ ] **Global Sıralama Paneli** — hiçbir ülke seçili değilken sağ panel boş kalmak yerine global ihracat sıralamasını gösterir:
   - "En Çok İhracat Yapan Ülkeler" — `mapCountries` state'inden sort+slice, sıfır yeni API çağrısı
   - "En Çok İhracat Yapan Firmalar" — yeni endpoint: `GET /api/companies/top-exporters?limit=10`
@@ -560,6 +569,65 @@ cd backend && npm run build
 
 ---
 
+## Deploy (Vercel + Backend)
+
+### Sıra Önemli: Önce Backend, Sonra Frontend
+
+Frontend Vercel'e deploy edilmeden önce backend'in canlı bir URL'i olması gerekir.
+`VITE_API_URL` environment variable olmadan uygulama veri gösteremez.
+
+### 1. Backend Deploy (Railway / Render / Fly.io)
+
+Backend Express sunucusunu (port 3001) aşağıdakilerden birine deploy et:
+
+**Render (önerilen, ücretsiz tier mevcut):**
+1. https://render.com → New Web Service → GitHub repo bağla
+2. Root Directory: `backend`
+3. Build Command: `npm install && npm run build`
+4. Start Command: `node dist/index.js`
+5. Environment Variables:
+   - `SUPABASE_URL` = `https://jgqvudrxxpibxjnltbml.supabase.co`
+   - `SUPABASE_SERVICE_KEY` = (`.env`'deki değer)
+   - `PORT` = `3001`
+6. Deploy → URL al (ör. `https://demo-isfeke-api.onrender.com`)
+
+> ✅ **Backend deploy edildi:** `https://iskefe-demo.onrender.com` (2026-02-26)
+
+### 2. Frontend Deploy (Vercel)
+
+**Vercel ayarları:**
+- Root Directory: `trade-map-app`
+- Framework Preset: **Vite** (otomatik seçilmeli)
+- Build Command: `npm run build`
+- Output Directory: `dist`
+- Install Command: `npm install`
+
+> **Not:** `trade-map-app/.npmrc`'de `legacy-peer-deps=true` mevcut — `react-simple-maps@3.0.0` React 19 peer dep çakışması için gerekli.
+
+> ✅ **Frontend deploy edildi:** `https://demo-isfeke.vercel.app` (2026-02-26)
+
+**Environment Variable (Vercel dashboard → Settings → Environment Variables):**
+- `VITE_API_URL` = `https://iskefe-demo.onrender.com/api` (backend URL'i)
+
+### 3. Frontend'de API URL Güncelleme
+
+`trade-map-app/src/App.tsx`'teki `API_BASE` satırını:
+```typescript
+const API_BASE = import.meta.env.VITE_API_URL ?? '/api';
+```
+olarak güncelle. Böylece:
+- Local dev: Vite proxy üzerinden `/api → localhost:3001`
+- Production: `VITE_API_URL` env var'dan backend URL'i
+
+### 4. Backend CORS Ayarı
+
+`backend/src/index.ts`'e Vercel domain'ini izin ver:
+```typescript
+app.use(cors({ origin: ['https://demo-isfeke.vercel.app', 'http://localhost:5173'] }));
+```
+
+---
+
 ## Önemli Notlar
 
 - Harita verisi CDN'den çekiliyor: `https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json`
@@ -572,5 +640,7 @@ cd backend && npm run build
 - Supabase'e otomatik SQL uygulamak için Management API PAT gerekli (service key yeterli değil); DDL için SQL Editor kullan
 - **WSL2 ağ notu (çözüldü):** `vite.config.ts`'te `/api → localhost:3001` proxy var; `App.tsx`'te `API_BASE = '/api'` sabit, IP'ye bağlı değil. Frontend Vite `server.host: true` ile `*:5173`'te dinliyor. Windows yeniden başlatılsa da çalışmaya devam eder.
 - `GET /api/search` backend endpoint'i mevcut (`backend/src/routes/search.ts`) ancak frontend'de kullanılmıyor
+- `GET /api/trades` + `GET /api/trades/export` — `backend/src/routes/trades.ts`'te hazır ama `index.ts`'e register edilmemiş; filtreleme paneli/CSV export özelliği eklendiğinde aktif edilecek
+- `*.xlsx` dosyaları `.gitignore`'da — Excel kaynak dosyaları repo'ya girmez, Supabase'de mevcut
 - Cache TTL: 5 dakika (ülke + firma); aynı ülkeye 2. tıklamada network isteği yoktur
 - AbortController: `countryAbortRef` + `companyAbortRef` — her yeni istekte önceki iptal edilir

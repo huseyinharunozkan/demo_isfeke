@@ -9,7 +9,7 @@ const { createClient } = require('@supabase/supabase-js');
 
 const SUPABASE_URL     = process.env.SUPABASE_URL;
 const SUPABASE_KEY     = process.env.SUPABASE_SERVICE_KEY;
-const EXCEL_PATH       = './trade-map-app/public/Ornek_Veri_Seti_final.xlsx';
+const EXCEL_PATH       = './trade-map-app/public/Kullanılacak 410150.xlsx';
 const BATCH_SIZE       = 200;
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -38,14 +38,33 @@ async function main() {
   console.log('📖 Excel okunuyor...');
   const workbook = XLSX.readFile(EXCEL_PATH);
   const ws       = workbook.Sheets[workbook.SheetNames[0]];
-  const rows     = XLSX.utils.sheet_to_json(ws);
-  console.log(`   ${rows.length} satır bulundu.`);
+  const allRows  = XLSX.utils.sheet_to_json(ws, { defval: null });
+  console.log(`   ${allRows.length} satır bulundu.`);
+
+  // Herhangi bir kolonu boş veya "-" olan satırları at
+  const isEmpty = v => v === null || v === '' || v === undefined || String(v).trim() === '-';
+  const rows = allRows.filter(r => Object.values(r).every(v => !isEmpty(v)));
+  console.log(`   ${rows.length} satır tamamen dolu (${allRows.length - rows.length} satır atlandı).`);
+
+  // Excel sütun adı normalizasyonu (Excel'deki gerçek adlar)
+  // GÖNDRİCİ ÜLKE  → typo (eksik E), Çıkış Limanı / Varış Limanı → küçük harf
+  const COL = {
+    SELLER_COUNTRY: 'GÖNDRİCİ ÜLKE',
+    SELLER_COMPANY: 'GÖNDERİCİ FİRMA',
+    BUYER_COUNTRY:  'ALICI ÜLKE',
+    BUYER_COMPANY:  'ALICI FİRMA',
+    EXIT_PORT:      'Çıkış Limanı',
+    ENTRY_PORT:     'Varış Limanı',
+  };
 
   // ── 1. ÜLKELER ────────────────────────────────────────────────────────────
   const countryNames = new Set();
   rows.forEach(r => {
-    if (r['GÖNDERİCİ ÜLKE']) countryNames.add(r['GÖNDERİCİ ÜLKE']);
-    if (r['ALICI ÜLKE'])     countryNames.add(r['ALICI ÜLKE']);
+    const sc = r[COL.SELLER_COUNTRY];
+    const bc = r[COL.BUYER_COUNTRY];
+    // "-" geçersiz ülke adını atla
+    if (sc && sc !== '-') countryNames.add(sc);
+    if (bc && bc !== '-') countryNames.add(bc);
   });
 
   const countryList = [...countryNames].map(name => ({ name }));
@@ -65,10 +84,14 @@ async function main() {
   // Firma adı → ülke adı (ilk görülen ülke kazanır)
   const companyCountry = new Map();
   rows.forEach(r => {
-    if (r['GÖNDERİCİ FİRMA'] && !companyCountry.has(r['GÖNDERİCİ FİRMA']))
-      companyCountry.set(r['GÖNDERİCİ FİRMA'], r['GÖNDERİCİ ÜLKE']);
-    if (r['ALICI FİRMA'] && !companyCountry.has(r['ALICI FİRMA']))
-      companyCountry.set(r['ALICI FİRMA'], r['ALICI ÜLKE']);
+    const sf = r[COL.SELLER_COMPANY];
+    const bf = r[COL.BUYER_COMPANY];
+    const sc = r[COL.SELLER_COUNTRY];
+    const bc = r[COL.BUYER_COUNTRY];
+    if (sf && !companyCountry.has(sf))
+      companyCountry.set(sf, (sc && sc !== '-') ? sc : null);
+    if (bf && !companyCountry.has(bf))
+      companyCountry.set(bf, (bc && bc !== '-') ? bc : null);
   });
 
   const companyList = [...companyCountry.entries()].map(([name, country]) => ({
@@ -93,15 +116,20 @@ async function main() {
   const trades = rows.map(r => {
     const quantity  = parseFloat(r['ÜRÜN MİKTARI (KG)'])  || 0;
     const unitPrice = parseFloat(r['ÜRÜN FİYATI (USD)'])   || 0;
+    const sc = r[COL.SELLER_COUNTRY];
+    const bc = r[COL.BUYER_COUNTRY];
+    // Liman değeri "-" ise null yap
+    const exitPort  = r[COL.EXIT_PORT]  && r[COL.EXIT_PORT]  !== '-' ? r[COL.EXIT_PORT]  : null;
+    const entryPort = r[COL.ENTRY_PORT] && r[COL.ENTRY_PORT] !== '-' ? r[COL.ENTRY_PORT] : null;
     return {
-      seller_company_id:      companyMap[r['GÖNDERİCİ FİRMA']] || null,
-      buyer_company_id:       companyMap[r['ALICI FİRMA']]      || null,
-      origin_country_id:      countryMap[r['GÖNDERİCİ ÜLKE']]  || null,
-      destination_country_id: countryMap[r['ALICI ÜLKE']]       || null,
+      seller_company_id:      companyMap[r[COL.SELLER_COMPANY]] || null,
+      buyer_company_id:       companyMap[r[COL.BUYER_COMPANY]]  || null,
+      origin_country_id:      (sc && sc !== '-') ? (countryMap[sc] || null) : null,
+      destination_country_id: (bc && bc !== '-') ? (countryMap[bc] || null) : null,
       product_description:    r['ÜRÜN AÇIKLAMA']                || null,
       hs_code:                r['ÜRÜN TARİFE KODU / HS CODE / GTİP']?.toString() || null,
-      exit_port:              r['ÇIKIŞ LİMANI']                 || null,
-      entry_port:             r['VARIŞ LİMANI']                 || null,
+      exit_port:              exitPort,
+      entry_port:             entryPort,
       trade_date:             parseDate(r['TARİH']),
       unit_price:             unitPrice,
       quantity_kg:            quantity,

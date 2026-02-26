@@ -17,7 +17,7 @@ const geoUrl = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
 
 // GeoJSON adı → veri tabanındaki ülke adı eşleştirmesi
 const nameMap: Record<string, string> = {
-  'United States of America': 'USA',
+  'United States of America': 'United States',
   'United Kingdom': 'United Kingdom',
   'Türkiye': 'Turkey',
   'Korea': 'South Korea',
@@ -33,6 +33,9 @@ export const WorldMap = ({ countries, onCountryClick, selectedCountry }: WorldMa
 
   const matchName = (geoName: string) => nameMap[geoName] ?? geoName;
 
+  // Logaritmik scale: tek dominant ülke diğerlerini soldurmaz
+  const logMax = Math.log1p(Math.max(...countries.map(c => c.totalTrade), 1));
+
   const getFillColor = (geoName: string) => {
     const name    = matchName(geoName);
     const country = countryMap.get(name);
@@ -40,8 +43,7 @@ export const WorldMap = ({ countries, onCountryClick, selectedCountry }: WorldMa
     if (name === selectedCountry) return '#2563eb';
     if (!country || country.totalTrade === 0) return '#e5e7eb';
 
-    const maxTrade  = Math.max(...countries.map(c => c.totalTrade));
-    const intensity = Math.min(country.totalTrade / maxTrade, 1);
+    const intensity = logMax > 0 ? Math.log1p(country.totalTrade) / logMax : 0;
 
     const r = Math.round(220 - intensity * 150);
     const g = Math.round(252 - intensity * 30);

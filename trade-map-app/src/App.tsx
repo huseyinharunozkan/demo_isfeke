@@ -1,23 +1,39 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { WorldMap } from './components/WorldMap';
 import { CountryDetail } from './components/CountryDetail';
 import { CompanyDetail } from './components/CompanyDetail';
 import type { MapCountry, CountryStats, CompanyStats } from './types/index.js';
 import './App.css';
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = '/api';
+const CACHE_TTL = 5 * 60 * 1000; // 5 dakika
+
+interface CacheEntry<T> { data: T; ts: number; }
 
 function App() {
-  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [selectedCountry, setSelectedCountry]   = useState<string | null>(null);
   const [showInstructions, setShowInstructions] = useState(true);
-  const [mapCountries, setMapCountries]   = useState<MapCountry[]>([]);
-  const [countryStats, setCountryStats]   = useState<CountryStats | null>(null);
-  const [selectedCompany, setSelectedCompany] = useState<CompanyStats | null>(null);
-  const [loadingMap, setLoadingMap]       = useState(true);
-  const [loadingStats, setLoadingStats]   = useState(false);
-  const [error, setError]                 = useState<string | null>(null);
+  const [mapCountries, setMapCountries]         = useState<MapCountry[]>([]);
+  const [countryStats, setCountryStats]         = useState<CountryStats | null>(null);
+  const [selectedCompany, setSelectedCompany]   = useState<CompanyStats | null>(null);
+  const [companyHistory, setCompanyHistory]     = useState<CompanyStats[]>([]);
+  const [loadingMap, setLoadingMap]             = useState(true);
+  const [loadingStats, setLoadingStats]         = useState(false);
+  const [error, setError]                       = useState<string | null>(null);
 
-  // Harita verilerini yükle
+  // TTL cache'ler
+  const countryCache = useRef(new Map<string, CacheEntry<CountryStats>>());
+  const companyCache = useRef(new Map<string, CacheEntry<CompanyStats>>());
+
+  // AbortController ref'leri — uçuştaki istekleri iptal etmek için
+  const countryAbortRef = useRef<AbortController | null>(null);
+  const companyAbortRef = useRef<AbortController | null>(null);
+
+  // Güncel selectedCompany'ye ref üzerinden erişim — callback'lerin stale closure'ını önler
+  const selectedCompanyRef = useRef<CompanyStats | null>(null);
+  useEffect(() => { selectedCompanyRef.current = selectedCompany; }, [selectedCompany]);
+
+  // Harita verilerini yükle (uygulama başlangıcında bir kez)
   useEffect(() => {
     fetch(`${API_BASE}/countries`)
       .then(r => r.json())
@@ -27,49 +43,96 @@ function App() {
       })
       .catch(err => {
         console.error('API bağlantı hatası:', err);
-        setError('Backend API\'ye bağlanılamadı. http://localhost:3001 çalışıyor mu?');
+        setError("Backend API'ye bağlanılamadı. http://localhost:3001 çalışıyor mu?");
       })
       .finally(() => setLoadingMap(false));
   }, []);
 
-  const handleCountryClick = async (countryName: string) => {
+  const handleCountryClick = useCallback(async (countryName: string) => {
     setSelectedCountry(countryName);
     setShowInstructions(false);
+    setSelectedCompany(null);
+    setCompanyHistory([]);
+
+    // Cache kontrolü
+    const cached = countryCache.current.get(countryName);
+    if (cached && Date.now() - cached.ts < CACHE_TTL) {
+      setCountryStats(cached.data);
+      return;
+    }
+
     setLoadingStats(true);
     setCountryStats(null);
 
-    try {
-      const res  = await fetch(`${API_BASE}/countries/${encodeURIComponent(countryName)}/stats`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Bilinmeyen hata');
-      setCountryStats(data as CountryStats);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('Stats hatası:', msg);
-    } finally {
-      setLoadingStats(false);
-    }
-  };
+    countryAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    countryAbortRef.current = ctrl;
 
-  const handleCompanyClick = async (companyName: string) => {
-    setLoadingStats(true);
     try {
-      const res  = await fetch(`${API_BASE}/companies/${encodeURIComponent(companyName)}`);
+      const res  = await fetch(`${API_BASE}/countries/${encodeURIComponent(countryName)}/stats`, { signal: ctrl.signal });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Bilinmeyen hata');
-      setSelectedCompany(data as CompanyStats);
+      const stats = data as CountryStats;
+      countryCache.current.set(countryName, { data: stats, ts: Date.now() });
+      setCountryStats(stats);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('Company stats hatası:', msg);
+      if ((err as Error).name === 'AbortError') return;
+      console.error('Stats hatası:', err instanceof Error ? err.message : String(err));
     } finally {
       setLoadingStats(false);
     }
-  };
+  }, []);
+
+  const handleCompanyClick = useCallback(async (companyName: string) => {
+    // Firma içinden firmaya geçişte mevcut firmayı geçmişe ekle
+    if (selectedCompanyRef.current) {
+      setCompanyHistory(prev => [...prev, selectedCompanyRef.current!]);
+    } else {
+      setCompanyHistory([]);
+    }
+
+    // Cache kontrolü
+    const cached = companyCache.current.get(companyName);
+    if (cached && Date.now() - cached.ts < CACHE_TTL) {
+      setSelectedCompany(cached.data);
+      return;
+    }
+
+    setLoadingStats(true);
+
+    companyAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    companyAbortRef.current = ctrl;
+
+    try {
+      const res  = await fetch(`${API_BASE}/companies/${encodeURIComponent(companyName)}`, { signal: ctrl.signal });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Bilinmeyen hata');
+      const stats = data as CompanyStats;
+      companyCache.current.set(companyName, { data: stats, ts: Date.now() });
+      setSelectedCompany(stats);
+    } catch (err: unknown) {
+      if ((err as Error).name === 'AbortError') return;
+      console.error('Company stats hatası:', err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingStats(false);
+    }
+  }, []);
+
+  const handleBackToCompany = useCallback(() => {
+    setCompanyHistory(prev => {
+      const newHistory = [...prev];
+      const previous   = newHistory.pop();
+      if (previous) setSelectedCompany(previous);
+      return newHistory;
+    });
+  }, []);
 
   const handleCloseDetail = () => {
     setSelectedCountry(null);
     setCountryStats(null);
     setSelectedCompany(null);
+    setCompanyHistory([]);
   };
 
   if (loadingMap) {
@@ -103,24 +166,25 @@ function App() {
     <div className="w-screen h-screen bg-gray-50 overflow-hidden">
       {/* Header */}
       <header className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow-lg">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-3xl font-bold">🌍 Dünya Ticaret Haritası</h1>
-              <p className="text-blue-100 text-sm mt-1">
-                Ülkelere tıklayarak detaylı ticaret istatistiklerini görüntüleyin
+        <div className="container mx-auto px-4 py-3">
+          <div className="flex justify-between items-center gap-4">
+            <div className="shrink-0">
+              <h1 className="text-2xl font-bold">🌍 Dünya Ticaret Haritası</h1>
+              <p className="text-blue-100 text-xs mt-0.5 hidden sm:block">
+                Ülkelere tıklayarak ticaret istatistiklerini görüntüleyin
               </p>
             </div>
-            <div className="bg-blue-800 px-4 py-2 rounded-lg">
-              <div className="text-sm text-blue-200">Ülke Sayısı</div>
-              <div className="text-2xl font-bold">{mapCountries.filter(c => c.totalTrade > 0).length}</div>
+
+            <div className="bg-blue-800 px-3 py-2 rounded-lg shrink-0">
+              <div className="text-xs text-blue-200">Ülke</div>
+              <div className="text-xl font-bold">{mapCountries.filter(c => c.totalTrade > 0).length}</div>
             </div>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <div className="relative" style={{ height: 'calc(100vh - 80px)' }}>
+      <div className="relative" style={{ height: 'calc(100vh - 72px)' }}>
         <div className="w-full h-full">
           <WorldMap
             countries={mapCountries}
@@ -136,7 +200,8 @@ function App() {
               <div className="text-6xl mb-4">🗺️</div>
               <h2 className="text-2xl font-bold text-gray-800 mb-4">Hoş Geldiniz!</h2>
               <p className="text-gray-600 mb-4">
-                Harita üzerindeki <span className="text-green-600 font-semibold">renkli ülkelere</span> tıklayarak detaylı ticaret bilgilerini görüntüleyebilirsiniz.
+                Harita üzerindeki <span className="text-green-600 font-semibold">renkli ülkelere</span> tıklayarak
+                detaylı ticaret bilgilerini görüntüleyebilirsiniz.
               </p>
               <div className="bg-gray-50 rounded p-4 text-left text-sm space-y-2">
                 {['En çok satan firmalar', 'En büyük müşteriler', 'Fiyat ortalamaları', 'Ticaret dengesi', 'Yıllık trend'].map(item => (
@@ -188,8 +253,10 @@ function App() {
         {!loadingStats && selectedCompany && (
           <CompanyDetail
             stats={selectedCompany}
-            onBack={() => setSelectedCompany(null)}
+            onBack={() => { setSelectedCompany(null); setCompanyHistory([]); }}
             onClose={handleCloseDetail}
+            onCompanyClick={handleCompanyClick}
+            onBackToCompany={companyHistory.length > 0 ? handleBackToCompany : undefined}
           />
         )}
 

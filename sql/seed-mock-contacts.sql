@@ -9,7 +9,7 @@ TRUNCATE TABLE contacts RESTART IDENTITY;
 
 -- Companies: address ve website sıfırla
 UPDATE companies SET address = NULL, website = NULL;
-
+  
 -- ──────────────────────────────────────────────────────────
 DO $$
 DECLARE

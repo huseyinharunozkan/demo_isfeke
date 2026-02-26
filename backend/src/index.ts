@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { countriesRouter } from './routes/countries';
 import { companiesRouter } from './routes/companies';
+import { searchRouter } from './routes/search';
 
 dotenv.config();
 
@@ -14,6 +15,7 @@ app.use(express.json());
 
 app.use('/api/countries', countriesRouter);
 app.use('/api/companies', companiesRouter);
+app.use('/api/search', searchRouter);
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.get('/.well-known/appspecific/com.chrome.devtools.json', (_req, res) => res.json({}));

@@ -69,10 +69,12 @@ export interface CompanyStats {
   totalImportValue: number;
   topCustomers: { name: string; volume: number; value: number }[];
   topDestinationCountries: { country: string; volume: number; value: number }[];
-  yearlyExports: { year: number; exportVolume: number; exportValue: number }[];
+  yearlyExports: { year: number; exportVolume: number; exportValue: number; shipmentCount: number }[];
   topSuppliers: { name: string; volume: number; value: number }[];
   topSourceCountries: { country: string; volume: number; value: number }[];
-  yearlyImports: { year: number; importVolume: number; importValue: number }[];
+  yearlyImports: { year: number; importVolume: number; importValue: number; shipmentCount: number }[];
+  exitPorts: { port: string; count: number }[];
+  entryPorts: { port: string; count: number }[];
 }
 
 export interface MapCountry {

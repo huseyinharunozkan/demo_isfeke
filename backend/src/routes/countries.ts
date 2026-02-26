@@ -5,7 +5,7 @@ export const countriesRouter = Router();
 
 const countryCodeMap: Record<string, string> = {
   Uruguay: 'URY', China: 'CHN', Russia: 'RUS', Brazil: 'BRA', Argentina: 'ARG',
-  USA: 'USA', Turkey: 'TUR', Netherlands: 'NLD', Nigeria: 'NGA',
+  'United States': 'USA', Turkey: 'TUR', Netherlands: 'NLD', Nigeria: 'NGA',
   'United Kingdom': 'GBR', Germany: 'DEU', Japan: 'JPN', Australia: 'AUS',
   India: 'IND', 'United Arab Emirates': 'ARE', France: 'FRA',
   'South Korea': 'KOR', Canada: 'CAN', Spain: 'ESP', Thailand: 'THA',
@@ -16,8 +16,16 @@ function getCountryCode(name: string): string {
   return countryCodeMap[name] ?? name.substring(0, 3).toUpperCase();
 }
 
+// ── In-process cache for GET /api/countries (5 min TTL) ───────────────────
+let countriesCache: { data: unknown; ts: number } | null = null;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
 // ── GET /api/countries — harita renklendirme için tüm ülkeler ──────────────
 countriesRouter.get('/', async (_req: Request, res: Response) => {
+  if (countriesCache && Date.now() - countriesCache.ts < CACHE_TTL_MS) {
+    return res.json(countriesCache.data);
+  }
+
   const { data, error } = await supabase
     .from('v_country_trade_summary')
     .select('*');
@@ -34,6 +42,7 @@ countriesRouter.get('/', async (_req: Request, res: Response) => {
     importValue:   Number(row.total_import_usd),
   }));
 
+  countriesCache = { data: mapped, ts: Date.now() };
   res.json(mapped);
 });
 
@@ -44,25 +53,15 @@ countriesRouter.get('/:name/stats', async (req: Request, res: Response) => {
   const [
     summaryRes,
     topExportersRes,
-    topBuyersRes,
     topImportersRes,
     topSellersRes,
-    topDestRes,
-    topSourcesRes,
     yearlyRes,
-    exportCompRes,
-    importCompRes,
   ] = await Promise.all([
     supabase.from('v_country_trade_summary').select('*').eq('country_name', name).maybeSingle(),
-    supabase.from('v_top_exporters').select('*').eq('country_name', name).order('total_usd', { ascending: false }).limit(10),
-    supabase.from('v_top_buyers')   .select('*').eq('country_name', name).order('total_usd', { ascending: false }).limit(10),
-    supabase.from('v_top_importers').select('*').eq('country_name', name).order('total_usd', { ascending: false }).limit(10),
-    supabase.from('v_top_sellers')  .select('*').eq('country_name', name).order('total_usd', { ascending: false }).limit(10),
-    supabase.from('v_top_destinations').select('*').eq('country_name', name).order('total_usd', { ascending: false }).limit(20),
-    supabase.from('v_top_sources')  .select('*').eq('country_name', name).order('total_usd', { ascending: false }).limit(20),
-    supabase.from('v_yearly_trade') .select('*').eq('country_name', name).order('year'),
-    supabase.from('v_export_companies').select('company_name').eq('country_name', name),
-    supabase.from('v_import_companies').select('company_name').eq('country_name', name),
+    supabase.from('v_top_exporters').select('*').eq('country_name', name).order('total_usd', { ascending: false }).limit(50),
+    supabase.from('v_top_importers').select('*').eq('country_name', name).order('total_usd', { ascending: false }).limit(50),
+    supabase.from('v_top_sellers').select('*').eq('country_name', name).order('total_usd', { ascending: false }).limit(50),
+    supabase.from('v_yearly_trade').select('*').eq('country_name', name).order('year'),
   ]);
 
   if (!summaryRes.data) {
@@ -76,35 +75,11 @@ countriesRouter.get('/:name/stats', async (req: Request, res: Response) => {
   const totalImportValue  = Number(s.total_import_usd);
   const tradeCount        = Number(s.trade_count ?? 0);
 
-  // Batch-lookup company home countries for all top-company lists
-  const allCompanyNames = [
-    ...(topExportersRes.data ?? []).map(r => r.company_name as string),
-    ...(topBuyersRes.data   ?? []).map(r => r.company_name as string),
-    ...(topImportersRes.data ?? []).map(r => r.company_name as string),
-    ...(topSellersRes.data  ?? []).map(r => r.company_name as string),
-  ].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
-
-  const companyCountryMap = new Map<string, string>();
-  if (allCompanyNames.length > 0) {
-    const { data: companyCountryData } = await supabase
-      .from('companies')
-      .select('name, countries(name)')
-      .in('name', allCompanyNames);
-
-    (companyCountryData ?? []).forEach((c: any) => {
-      const cr = c.countries;
-      const cName = Array.isArray(cr)
-        ? ((cr[0] as { name: string })?.name ?? '')
-        : ((cr as { name: string } | null)?.name ?? '');
-      companyCountryMap.set(c.name as string, cName);
-    });
-  }
-
   const mapCompany = (r: any) => ({
-    name:          r.company_name as string,
-    volume:        Number(r.total_kg),
-    value:         Number(r.total_usd),
-    companyCountry: companyCountryMap.get(r.company_name as string) ?? '',
+    name:   r.company_name as string,
+    volume: Number(r.total_kg),
+    value:  Number(r.total_usd),
+    companyCountry: '',
   });
 
   res.json({
@@ -120,20 +95,24 @@ countriesRouter.get('/:name/stats', async (req: Request, res: Response) => {
     tradeCount,
 
     topExporters:  (topExportersRes.data ?? []).map(mapCompany),
-    topBuyers:     (topBuyersRes.data   ?? []).map(mapCompany),
+    topBuyers:     [],
     topImporters:  (topImportersRes.data ?? []).map(mapCompany),
-    topSellers:    (topSellersRes.data  ?? []).map(mapCompany),
+    topSellers:    (topSellersRes.data ?? []).map(mapCompany),
 
-    topDestinations: (topDestRes.data    ?? []).map(r => ({ country: r.destination_country, volume: Number(r.total_kg), value: Number(r.total_usd) })),
-    topSources:      (topSourcesRes.data ?? []).map(r => ({ country: r.source_country,      volume: Number(r.total_kg), value: Number(r.total_usd) })),
+    topDestinations: [],
+    topSources:      [],
 
-    yearlyTrade:     (yearlyRes.data ?? []).map(r => ({ year: r.year, exportValue: Number(r.export_usd), importValue: Number(r.import_usd) })),
+    yearlyTrade: (yearlyRes.data ?? []).map(r => ({
+      year:        r.year,
+      exportValue: Number(r.export_usd),
+      importValue: Number(r.import_usd),
+    })),
 
     exitPorts:  [],
     entryPorts: [],
 
-    exportCompanies: (exportCompRes.data ?? []).map(r => r.company_name as string),
-    importCompanies: (importCompRes.data ?? []).map(r => r.company_name as string),
+    exportCompanies: [],
+    importCompanies: [],
 
     rawExports: [],
     rawImports: [],
